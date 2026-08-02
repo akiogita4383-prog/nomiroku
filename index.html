@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
+<title>呑み録 - 酒の記録帳</title>
+<meta name="description" content="飲んだお酒の種類・写真・味を記録するテイスティングノート">
+<meta name="theme-color" content="#15110c">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="呑み録">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%2315110c'/%3E%3Ctext x='50' y='68' font-size='58' text-anchor='middle'%3E%F0%9F%8D%B6%3C/text%3E%3C/svg%3E">
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%2315110c'/%3E%3Ctext x='50' y='68' font-size='58' text-anchor='middle'%3E%F0%9F%8D%B6%3C/text%3E%3C/svg%3E">
+<link rel="manifest" href="manifest.json">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@500;700;800&family=Noto+Sans+JP:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#15110c;
+    --bg-elevated:#1c150f;
+    --surface:#241c15;
+    --surface-hover:#2c2219;
+    --border: rgba(201,161,92,0.16);
+    --border-strong: rgba(201,161,92,0.32);
+    --gold:#c9a15c;
+    --gold-bright:#e3bc7a;
+    --cream:#ede4d3;
+    --muted:#948871;
+    --danger:#b3503f;
+
+    --c-beer:#e0a53f;
+    --c-sake:#e4dbc4;
+    --c-wine:#8b2f42;
+    --c-whisky:#a8611e;
+    --c-highball:#5b9178;
+    --c-cocktail:#4f95a0;
+    --c-other:#8a8171;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0; padding:0;}
+  body{
+    background:
+      radial-gradient(ellipse 800px 500px at 50% -10%, rgba(201,161,92,0.08), transparent 60%),
+      var(--bg);
+    color:var(--cream);
+    font-family:'Noto Sans JP', sans-serif;
+    min-height:100vh;
+    padding-bottom:96px;
+  }
+  .display{ font-family:'Shippori Mincho', serif; }
+
+  /* ---------- Header ---------- */
+  header.app-header{
+    position:sticky; top:0; z-index:20;
+    background:linear-gradient(180deg, var(--bg) 70%, rgba(21,17,12,0.85) 100%);
+    backdrop-filter:blur(6px);
+    padding:22px 20px 14px;
+    border-bottom:1px solid var(--border);
+  }
+  .brand{ display:flex; align-items:baseline; gap:10px; }
+  .brand h1{
+    font-size:26px; font-weight:800; letter-spacing:0.08em; margin:0;
+    color:var(--gold-bright);
+  }
+  .brand span.sub{ font-size:11px; color:var(--muted); letter-spacing:0.15em; }
+  .stats-row{ display:flex; gap:18px; margin-top:10px; }
+  .stat{ font-size:12px; color:var(--muted); }
+  .stat b{ color:var(--gold-bright); font-size:15px; font-weight:700; margin-right:4px; font-family:'Shippori Mincho',serif; }
+
+  .filter-row{
+    display:flex; gap:8px; overflow-x:auto; margin-top:16px; padding-bottom:4px;
+    scrollbar-width:none;
+  }
+  .filter-row::-webkit-scrollbar{ display:none; }
+  .chip{
+    flex:0 0 auto; padding:7px 14px; border-radius:20px;
+    border:1px solid var(--border); background:var(--surface);
+    color:var(--muted); font-size:12.5px; font-weight:500;
+    display:flex; align-items:center; gap:6px; cursor:pointer;
+    transition:all .15s ease; white-space:nowrap;
+  }
+  .chip .dot{ width:7px; height:7px; border-radius:50%; }
+  .chip.active{ border-color:var(--border-strong); color:var(--cream); background:var(--surface-hover); }
+
+  /* ---------- List ---------- */
+  main{ padding:18px 16px 0; max-width:640px; margin:0 auto; }
+  .empty-state{
+    text-align:center; padding:70px 20px; color:var(--muted);
+  }
+  .empty-state .glyph{ font-size:34px; margin-bottom:14px; opacity:0.6; }
+  .empty-state p{ font-size:13.5px; line-height:1.8; margin:6px 0 0; }
+
+  .card-list{ display:flex; flex-direction:column; gap:12px; }
+
+  .card{
+    position:relative;
+    background:var(--surface);
+    border:1px solid var(--border);
+    border-radius:4px 4px 10px 10px;
+    display:flex; gap:0;
+    overflow:hidden;
+    cursor:pointer;
+    transition:border-color .15s ease, transform .15s ease;
+  }
+  .card:active{ transform:scale(0.99); }
+  .card:hover{ border-color:var(--border-strong); }
+  .card::before{
+    content:''; position:absolute; top:0; left:0; right:0; height:3px;
+    background:var(--type-color, var(--gold));
+  }
+  .card-photo{
+    width:88px; height:88px; flex:0 0 auto;
+    background:var(--bg-elevated);
+    display:flex; align-items:center; justify-content:center;
+    font-size:26px; color:var(--muted);
+    margin:14px 0 14px 14px; border-radius:6px; overflow:hidden;
+  }
+  .card-photo img{ width:100%; height:100%; object-fit:cover; }
+  .card-body{ flex:1; padding:14px 14px 12px; min-width:0; }
+  .card-top{ display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
+  .card-name{ font-family:'Shippori Mincho',serif; font-weight:700; font-size:16.5px; color:var(--cream); line-height:1.3; }
+  .card-date{ font-size:11px; color:var(--muted); white-space:nowrap; margin-top:2px; }
+  .card-type-tag{
+    display:inline-flex; align-items:center; gap:5px; font-size:11px;
+    color:var(--type-color, var(--gold)); margin-top:6px; font-weight:600;
+  }
+  .card-type-tag .dot{ width:6px; height:6px; border-radius:50%; background:var(--type-color, var(--gold)); }
+  .card-memo{ font-size:12px; color:var(--muted); margin-top:7px; line-height:1.6;
+    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .card-meta{ display:flex; align-items:center; gap:12px; margin-top:9px; }
+  .rating-dots{ display:flex; gap:3px; }
+  .rating-dots .rd{ width:6px; height:6px; border-radius:50%; background:var(--border-strong); }
+  .rating-dots .rd.filled{ background:var(--gold-bright); }
+  .sweetness-mini{ display:flex; align-items:center; gap:5px; font-size:10.5px; color:var(--muted); }
+  .sweetness-mini .track{ width:34px; height:3px; border-radius:2px; background:linear-gradient(90deg,#e3bc7a,#7a6b52,#4a4038); position:relative; }
+  .sweetness-mini .track .pin{ position:absolute; top:-2px; width:2px; height:7px; background:var(--cream); border-radius:1px; }
+
+  /* ---------- FAB ---------- */
+  .fab{
+    position:fixed; right:20px; bottom:26px; z-index:30;
+    width:58px; height:58px; border-radius:50%;
+    background:linear-gradient(155deg, var(--gold-bright), var(--gold));
+    color:#1c1408; border:none; font-size:28px; font-weight:600;
+    display:flex; align-items:center; justify-content:center;
+    box-shadow:0 8px 22px rgba(201,161,92,0.35), 0 2px 6px rgba(0,0,0,0.4);
+    cursor:pointer;
+  }
+  .fab:active{ transform:scale(0.94); }
+
+  /* ---------- Sheet / Modal ---------- */
+  .overlay{
+    position:fixed; inset:0; background:rgba(10,8,5,0.6); backdrop-filter:blur(2px);
+    z-index:40; opacity:0; pointer-events:none; transition:opacity .2s ease;
+  }
+  .overlay.open{ opacity:1; pointer-events:auto; }
+  .sheet{
+    position:fixed; left:0; right:0; bottom:0; z-index:41;
+    background:var(--bg-elevated); border-top:1px solid var(--border-strong);
+    border-radius:18px 18px 0 0;
+    max-height:92vh; overflow-y:auto;
+    transform:translateY(100%); transition:transform .28s cubic-bezier(.32,.72,0,1);
+    padding:10px 20px calc(28px + env(safe-area-inset-bottom));
+  }
+  .sheet.open{ transform:translateY(0); }
+  .sheet-handle{ width:36px; height:4px; background:var(--border-strong); border-radius:2px; margin:8px auto 14px; }
+  .sheet-title{ font-family:'Shippori Mincho',serif; font-size:19px; font-weight:700; color:var(--gold-bright); margin-bottom:18px; }
+
+  label.field-label{ display:block; font-size:11.5px; color:var(--muted); margin:16px 0 8px; letter-spacing:0.05em; }
+  input[type=text], input[type=date], textarea{
+    width:100%; background:var(--surface); border:1px solid var(--border);
+    color:var(--cream); border-radius:8px; padding:11px 13px; font-size:14.5px;
+    font-family:inherit; outline:none;
+  }
+  input[type=text]:focus, input[type=date]:focus, textarea:focus{ border-color:var(--gold); }
+  textarea{ resize:vertical; min-height:70px; line-height:1.6; }
+
+  .type-grid{ display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
+  .type-btn{
+    background:var(--surface); border:1px solid var(--border); border-radius:10px;
+    padding:11px 4px; text-align:center; cursor:pointer; color:var(--muted); font-size:11px;
+    display:flex; flex-direction:column; align-items:center; gap:5px;
+  }
+  .type-btn .glyph{ font-size:19px; }
+  .type-btn.active{ border-color:var(--type-color); color:var(--cream); background:var(--surface-hover); box-shadow:inset 0 0 0 1px var(--type-color); }
+
+  .photo-input{
+    border:1.5px dashed var(--border-strong); border-radius:10px; height:150px;
+    display:flex; align-items:center; justify-content:center; flex-direction:column; gap:6px;
+    color:var(--muted); font-size:12.5px; cursor:pointer; overflow:hidden; position:relative;
+    background:var(--surface);
+  }
+  .photo-input img{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+  .photo-input .glyph{ font-size:24px; }
+
+  .sweetness-row{ padding:6px 4px 0; }
+  .sweetness-labels{ display:flex; justify-content:space-between; font-size:11px; color:var(--muted); margin-bottom:8px; }
+  input[type=range]{
+    -webkit-appearance:none; width:100%; height:8px; border-radius:4px;
+    background:linear-gradient(90deg,#e3bc7a,#7a6b52,#4a4038); outline:none;
+  }
+  input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none; width:20px; height:20px; border-radius:50%;
+    background:var(--cream); border:3px solid var(--gold); cursor:pointer; margin-top:-1px;
+  }
+
+  .star-row{ display:flex; gap:10px; margin-top:4px; }
+  .star-row .st{ font-size:26px; color:var(--border-strong); cursor:pointer; }
+  .star-row .st.on{ color:var(--gold-bright); }
+
+  .sheet-actions{ display:flex; gap:10px; margin-top:24px; }
+  .btn{
+    flex:1; padding:13px; border-radius:10px; border:none; font-size:14.5px; font-weight:700;
+    cursor:pointer; font-family:inherit;
+  }
+  .btn-primary{ background:linear-gradient(155deg, var(--gold-bright), var(--gold)); color:#1c1408; }
+  .btn-ghost{ background:transparent; border:1px solid var(--border-strong); color:var(--muted); flex:0 0 auto; padding:13px 18px; }
+  .btn-danger{ background:transparent; border:1px solid var(--danger); color:var(--danger); }
+
+  /* ---------- Detail sheet ---------- */
+  .detail-photo{ width:100%; height:220px; border-radius:10px; overflow:hidden; background:var(--surface); display:flex; align-items:center; justify-content:center; font-size:40px; color:var(--muted); }
+  .detail-photo img{ width:100%; height:100%; object-fit:cover; }
+  .detail-head{ margin-top:16px; }
+  .detail-name{ font-family:'Shippori Mincho',serif; font-size:22px; font-weight:800; color:var(--cream); }
+  .detail-sub{ font-size:12px; color:var(--muted); margin-top:4px; }
+  .detail-section{ margin-top:20px; }
+  .detail-section h4{ font-size:11.5px; color:var(--muted); letter-spacing:0.06em; margin:0 0 10px; font-weight:600; }
+  .detail-memo{ font-size:13.5px; line-height:1.85; color:var(--cream); white-space:pre-wrap; }
+</style>
+</head>
+<body>
+
+<header class="app-header">
+  <div class="brand">
+    <h1 class="display">呑み録</h1>
+    <span class="sub">TASTING&nbsp;NOTES</span>
+  </div>
+  <div class="stats-row">
+    <div class="stat"><b id="statCount">0</b>記録</div>
+    <div class="stat"><b id="statTypes">0</b>種類</div>
+    <div class="stat"><b id="statMonth">0</b>今月</div>
+  </div>
+  <div class="filter-row" id="filterRow"></div>
+</header>
+
+<main>
+  <div id="listWrap"></div>
+</main>
+
+<button class="fab" id="fabAdd">＋</button>
+
+<div class="overlay" id="overlay"></div>
+
+<!-- Add / Edit Sheet -->
+<div class="sheet" id="editSheet">
+  <div class="sheet-handle"></div>
+  <div class="sheet-title" id="editTitle">今日の一杯を記録</div>
+
+  <div class="photo-input" id="photoInput">
+    <div class="glyph">📷</div>
+    <div>写真を追加（カメラ／ライブラリ）</div>
+  </div>
+  <input type="file" accept="image/*" id="photoFile" style="display:none">
+
+  <label class="field-label">お酒の名前</label>
+  <input type="text" id="fName" placeholder="例）獺祭 純米大吟醸">
+
+  <label class="field-label">種類</label>
+  <div class="type-grid" id="typeGrid"></div>
+
+  <label class="field-label">日付</label>
+  <input type="date" id="fDate">
+
+  <label class="field-label">甘辛（甘口 ← → 辛口）</label>
+  <div class="sweetness-row">
+    <div class="sweetness-labels"><span>甘口</span><span>辛口</span></div>
+    <input type="range" id="fSweet" min="1" max="5" value="3" step="1">
+  </div>
+
+  <label class="field-label">満足度</label>
+  <div class="star-row" id="starRow"></div>
+
+  <label class="field-label">メモ（香り・味わい・感想など）</label>
+  <textarea id="fMemo" placeholder="フルーティーで飲みやすい、後味すっきり…など"></textarea>
+
+  <div class="sheet-actions">
+    <button class="btn btn-ghost" id="cancelBtn">キャンセル</button>
+    <button class="btn btn-primary" id="saveBtn">記録する</button>
+  </div>
+</div>
+
+<!-- Detail Sheet -->
+<div class="sheet" id="detailSheet">
+  <div class="sheet-handle"></div>
+  <div class="detail-photo" id="dPhoto">🍶</div>
+  <div class="detail-head">
+    <div class="detail-name" id="dName"></div>
+    <div class="detail-sub" id="dSub"></div>
+  </div>
+  <div class="detail-section">
+    <h4>甘辛</h4>
+    <div class="sweetness-row"><div class="sweetness-labels"><span>甘口</span><span>辛口</span></div>
+      <div style="height:8px;border-radius:4px;background:linear-gradient(90deg,#e3bc7a,#7a6b52,#4a4038);position:relative;">
+        <div id="dPin" style="position:absolute;top:-3px;width:3px;height:14px;background:var(--cream);border-radius:1px;"></div>
+      </div>
+    </div>
+  </div>
+  <div class="detail-section">
+    <h4>満足度</h4>
+    <div class="star-row" id="dStars"></div>
+  </div>
+  <div class="detail-section">
+    <h4>メモ</h4>
+    <div class="detail-memo" id="dMemo"></div>
+  </div>
+  <div class="sheet-actions">
+    <button class="btn btn-ghost" id="dEditBtn">編集</button>
+    <button class="btn btn-danger" id="dDeleteBtn">削除</button>
+  </div>
+</div>
+
+<script>
+const TYPES = [
+  {id:'beer', label:'ビール', glyph:'🍺', color:'var(--c-beer)'},
+  {id:'sake', label:'日本酒', glyph:'🍶', color:'var(--c-sake)'},
+  {id:'wine', label:'ワイン', glyph:'🍷', color:'var(--c-wine)'},
+  {id:'whisky', label:'ウイスキー', glyph:'🥃', color:'var(--c-whisky)'},
+  {id:'highball', label:'ハイボール', glyph:'🧊', color:'var(--c-highball)'},
+  {id:'cocktail', label:'カクテル', glyph:'🍸', color:'var(--c-cocktail)'},
+  {id:'other', label:'その他', glyph:'🍹', color:'var(--c-other)'},
+];
+const typeMap = Object.fromEntries(TYPES.map(t=>[t.id,t]));
+const STORE_KEY = 'nomiroku_entries_v1';
+
+let entries = loadEntries();
+let activeFilter = 'all';
+let editingId = null;
+let currentPhoto = null;
+let currentType = 'sake';
+let currentRating = 3;
+
+function loadEntries(){
+  try{ return JSON.parse(localStorage.getItem(STORE_KEY)) || []; }
+  catch(e){ return []; }
+}
+function saveEntries(){
+  localStorage.setItem(STORE_KEY, JSON.stringify(entries));
+}
+function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
+
+/* ---------- Filter chips ---------- */
+function renderFilters(){
+  const row = document.getElementById('filterRow');
+  const counts = {};
+  entries.forEach(e=> counts[e.type] = (counts[e.type]||0)+1 );
+  let html = `<div class="chip ${activeFilter==='all'?'active':''}" data-f="all"><span class="dot" style="background:var(--gold)"></span>すべて</div>`;
+  TYPES.forEach(t=>{
+    if(!counts[t.id]) return;
+    html += `<div class="chip ${activeFilter===t.id?'active':''}" data-f="${t.id}"><span class="dot" style="background:${t.color}"></span>${t.label}</div>`;
+  });
+  row.innerHTML = html;
+  row.querySelectorAll('.chip').forEach(c=>{
+    c.addEventListener('click', ()=>{ activeFilter = c.dataset.f; renderAll(); });
+  });
+}
+
+/* ---------- Stats ---------- */
+function renderStats(){
+  document.getElementById('statCount').textContent = entries.length;
+  document.getElementById('statTypes').textContent = new Set(entries.map(e=>e.type)).size;
+  const now = new Date();
+  const thisMonth = entries.filter(e=>{
+    const d = new Date(e.date);
+    return d.getFullYear()===now.getFullYear() && d.getMonth()===now.getMonth();
+  }).length;
+  document.getElementById('statMonth').textContent = thisMonth;
+}
+
+/* ---------- List ---------- */
+function renderList(){
+  const wrap = document.getElementById('listWrap');
+  const list = entries
+    .filter(e=> activeFilter==='all' || e.type===activeFilter)
+    .sort((a,b)=> (b.date+b.createdAt).localeCompare(a.date+a.createdAt));
+
+  if(list.length===0){
+    wrap.innerHTML = `<div class="empty-state">
+      <div class="glyph">🍶</div>
+      <p>まだ記録がありません。<br>右下の＋ボタンから、今日の一杯を記録しましょう。</p>
+    </div>`;
+    return;
+  }
+
+  wrap.innerHTML = `<div class="card-list">${list.map(cardHTML).join('')}</div>`;
+  wrap.querySelectorAll('.card').forEach(c=>{
+    c.addEventListener('click', ()=> openDetail(c.dataset.id));
+  });
+}
+
+function cardHTML(e){
+  const t = typeMap[e.type];
+  const dateStr = formatDate(e.date);
+  const photo = e.photo
+    ? `<img src="${e.photo}" alt="">`
+    : t.glyph;
+  const dots = [1,2,3,4,5].map(i=>`<span class="rd ${i<=e.rating?'filled':''}"></span>`).join('');
+  const pinPos = ((e.sweet-1)/4*100);
+  return `
+  <div class="card" data-id="${e.id}" style="--type-color:${t.color}">
+    <div class="card-photo">${photo}</div>
+    <div class="card-body">
+      <div class="card-top">
+        <div class="card-name">${escapeHtml(e.name)}</div>
+        <div class="card-date">${dateStr}</div>
+      </div>
+      <div class="card-type-tag"><span class="dot"></span>${t.label}</div>
+      ${e.memo ? `<div class="card-memo">${escapeHtml(e.memo)}</div>` : ''}
+      <div class="card-meta">
+        <div class="rating-dots">${dots}</div>
+        <div class="sweetness-mini"><span>甘辛</span><div class="track"><div class="pin" style="left:${pinPos}%"></div></div></div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function formatDate(iso){
+  const d = new Date(iso+'T00:00:00');
+  return `${d.getMonth()+1}/${d.getDate()}`;
+}
+function escapeHtml(s){
+  return (s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function renderAll(){
+  renderFilters();
+  renderStats();
+  renderList();
+}
+
+/* ---------- Overlay / Sheets ---------- */
+const overlay = document.getElementById('overlay');
+const editSheet = document.getElementById('editSheet');
+const detailSheet = document.getElementById('detailSheet');
+
+function openSheet(sheet){
+  overlay.classList.add('open');
+  sheet.classList.add('open');
+}
+function closeSheets(){
+  overlay.classList.remove('open');
+  editSheet.classList.remove('open');
+  detailSheet.classList.remove('open');
+}
+overlay.addEventListener('click', closeSheets);
+
+/* ---------- Type grid ---------- */
+function renderTypeGrid(){
+  const grid = document.getElementById('typeGrid');
+  grid.innerHTML = TYPES.map(t=>`
+    <div class="type-btn ${currentType===t.id?'active':''}" data-t="${t.id}" style="--type-color:${t.color}">
+      <div class="glyph">${t.glyph}</div>
+      <div>${t.label}</div>
+    </div>`).join('');
+  grid.querySelectorAll('.type-btn').forEach(b=>{
+    b.addEventListener('click', ()=>{ currentType = b.dataset.t; renderTypeGrid(); });
+  });
+}
+
+/* ---------- Star rating (edit form) ---------- */
+function renderStarRow(){
+  const row = document.getElementById('starRow');
+  row.innerHTML = [1,2,3,4,5].map(i=>`<span class="st ${i<=currentRating?'on':''}" data-v="${i}">★</span>`).join('');
+  row.querySelectorAll('.st').forEach(s=>{
+    s.addEventListener('click', ()=>{ currentRating = parseInt(s.dataset.v); renderStarRow(); });
+  });
+}
+
+/* ---------- Add / Edit flow ---------- */
+document.getElementById('fabAdd').addEventListener('click', ()=> openEditForm(null));
+document.getElementById('cancelBtn').addEventListener('click', closeSheets);
+
+function openEditForm(entry){
+  editingId = entry ? entry.id : null;
+  document.getElementById('editTitle').textContent = entry ? 'ラベルを編集' : '今日の一杯を記録';
+  document.getElementById('fName').value = entry ? entry.name : '';
+  document.getElementById('fDate').value = entry ? entry.date : new Date().toISOString().slice(0,10);
+  document.getElementById('fSweet').value = entry ? entry.sweet : 3;
+  document.getElementById('fMemo').value = entry ? entry.memo : '';
+  currentType = entry ? entry.type : 'sake';
+  currentRating = entry ? entry.rating : 3;
+  currentPhoto = entry ? entry.photo : null;
+  renderTypeGrid();
+  renderStarRow();
+  renderPhotoPreview();
+  openSheet(editSheet);
+}
+
+function renderPhotoPreview(){
+  const box = document.getElementById('photoInput');
+  box.innerHTML = currentPhoto
+    ? `<img src="${currentPhoto}" alt="">`
+    : `<div class="glyph">📷</div><div>写真を追加（カメラ／ライブラリ）</div>`;
+}
+
+document.getElementById('photoInput').addEventListener('click', ()=> document.getElementById('photoFile').click());
+document.getElementById('photoFile').addEventListener('change', (ev)=>{
+  const file = ev.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = (e)=>{
+    const img = new Image();
+    img.onload = ()=>{
+      const maxW = 800;
+      const scale = Math.min(1, maxW/img.width);
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width*scale;
+      canvas.height = img.height*scale;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img,0,0,canvas.width,canvas.height);
+      currentPhoto = canvas.toDataURL('image/jpeg', 0.72);
+      renderPhotoPreview();
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+});
+
+document.getElementById('saveBtn').addEventListener('click', ()=>{
+  const name = document.getElementById('fName').value.trim();
+  if(!name){ document.getElementById('fName').focus(); return; }
+  const date = document.getElementById('fDate').value || new Date().toISOString().slice(0,10);
+  const memo = document.getElementById('fMemo').value.trim();
+  const sweet = parseInt(document.getElementById('fSweet').value);
+
+  if(editingId){
+    const idx = entries.findIndex(e=>e.id===editingId);
+    entries[idx] = {...entries[idx], name, date, memo, sweet, type:currentType, rating:currentRating, photo:currentPhoto};
+  } else {
+    entries.push({
+      id: uid(), name, date, memo, sweet, type: currentType, rating: currentRating,
+      photo: currentPhoto, createdAt: Date.now().toString()
+    });
+  }
+  saveEntries();
+  closeSheets();
+  renderAll();
+});
+
+/* ---------- Detail view ---------- */
+let detailId = null;
+function openDetail(id){
+  const e = entries.find(x=>x.id===id);
+  if(!e) return;
+  detailId = id;
+  const t = typeMap[e.type];
+  document.getElementById('dPhoto').innerHTML = e.photo ? `<img src="${e.photo}">` : t.glyph;
+  document.getElementById('dName').textContent = e.name;
+  document.getElementById('dSub').textContent = `${t.label} ・ ${formatDate(e.date)}`;
+  document.getElementById('dPin').style.left = ((e.sweet-1)/4*100)+'%';
+  document.getElementById('dStars').innerHTML = [1,2,3,4,5].map(i=>`<span class="st ${i<=e.rating?'on':''}">★</span>`).join('');
+  document.getElementById('dMemo').textContent = e.memo || '（メモなし）';
+  openSheet(detailSheet);
+}
+document.getElementById('dEditBtn').addEventListener('click', ()=>{
+  const e = entries.find(x=>x.id===detailId);
+  closeSheets();
+  setTimeout(()=> openEditForm(e), 200);
+});
+document.getElementById('dDeleteBtn').addEventListener('click', ()=>{
+  if(!confirm('この記録を削除しますか？')) return;
+  entries = entries.filter(e=>e.id!==detailId);
+  saveEntries();
+  closeSheets();
+  renderAll();
+});
+
+renderAll();
+</script>
+</body>
+</html>
