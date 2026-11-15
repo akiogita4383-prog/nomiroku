@@ -172,9 +172,9 @@
     position:fixed; left:0; right:0; bottom:0; z-index:41;
     background:var(--bg-elevated); border-top:1px solid var(--border-strong);
     border-radius:18px 18px 0 0;
-    max-height:92vh; overflow-y:auto;
+    max-height:92vh; max-height:92dvh; overflow-y:auto; overscroll-behavior:contain;
     transform:translateY(100%); transition:transform .28s cubic-bezier(.32,.72,0,1);
-    padding:10px 20px calc(28px + env(safe-area-inset-bottom));
+    padding:10px 20px 0;
   }
   .sheet.open{ transform:translateY(0); }
   .sheet-handle{ width:36px; height:4px; background:var(--border-strong); border-radius:2px; margin:8px auto 14px; }
@@ -223,10 +223,17 @@
   .star-row .st.on{ color:var(--gold-bright); }
 
   .sheet-actions{ display:flex; gap:10px; margin-top:24px; }
+  /* ボタン行はシートの下端に固定。長いフォームでも「記録する」が常に画面内にある */
+  .sheet-actions.sticky{
+    position:sticky; bottom:0; z-index:2;
+    margin:20px -20px 0; padding:12px 20px calc(14px + env(safe-area-inset-bottom));
+    background:var(--bg-elevated); border-top:1px solid var(--border);
+  }
   .btn{
     flex:1; padding:13px; border-radius:10px; border:none; font-size:14.5px; font-weight:700;
-    cursor:pointer; font-family:inherit;
+    cursor:pointer; font-family:inherit; touch-action:manipulation;
   }
+  .btn:disabled{ opacity:.6; cursor:default; }
   .btn-primary{ background:linear-gradient(155deg, var(--gold-bright), var(--gold)); color:#1c1408; }
   .btn-ghost{ background:transparent; border:1px solid var(--border-strong); color:var(--muted); flex:0 0 auto; padding:13px 18px; }
   .btn-danger{ background:transparent; border:1px solid var(--danger); color:var(--danger); }
@@ -248,6 +255,7 @@
   <div class="brand">
     <h1 class="display">呑み録</h1>
     <span class="sub">TASTING&nbsp;NOTES</span>
+    <span class="sub" style="margin-left:auto;opacity:.55">v3</span>
   </div>
   <div class="stats-row">
     <div class="stat"><b id="statCount">0</b>記録</div>
@@ -298,7 +306,7 @@
   <label class="field-label">メモ（香り・味わい・感想など）</label>
   <textarea id="fMemo" placeholder="フルーティーで飲みやすい、後味すっきり…など"></textarea>
 
-  <div class="sheet-actions">
+  <div class="sheet-actions sticky">
     <button class="btn btn-ghost" id="cancelBtn">キャンセル</button>
     <button class="btn btn-primary" id="saveBtn">記録する</button>
   </div>
@@ -328,7 +336,7 @@
     <h4>メモ</h4>
     <div class="detail-memo" id="dMemo"></div>
   </div>
-  <div class="sheet-actions">
+  <div class="sheet-actions sticky">
     <button class="btn btn-ghost" id="dEditBtn">編集</button>
     <button class="btn btn-danger" id="dDeleteBtn">削除</button>
   </div>
@@ -351,6 +359,8 @@ const DB_STORE = 'entries';
 
 let entries = [];
 let db = null;               // IndexedDB。使えない環境では null（localStorageで代替）
+let useIDB = false;          // IndexedDBを使えているか（接続が一時的に切れても true のまま）
+let pendingNewId = null;     // 保存に失敗して再試行するとき、同じIDを使い回す（重複登録を防ぐ）
 let activeFilter = 'all';
 let editingId = null;
 let currentPhoto = null;     // 詳細表示用（大きめ）
@@ -395,25 +405,66 @@ function readLegacy(){
   }catch(e){ return []; }
 }
 
+/* ---- 接続切れ・固まりへの備え ----
+   スマホはアプリを裏に回すとIndexedDBの接続を閉じることがあり、そのままだと
+   保存が失敗し続けたり、応答が返らずボタンが無反応になる。
+   → 応答には制限時間を設け、失敗したら接続を開き直して1回だけ自動で再試行する */
+const DB_TIMEOUT = 4000;
+function withTimeout(p, ms, label){
+  return new Promise((resolve, reject)=>{
+    const t = setTimeout(()=> reject(new Error(label || 'timeout')), ms);
+    p.then(v=>{ clearTimeout(t); resolve(v); }, e=>{ clearTimeout(t); reject(e); });
+  });
+}
+function watchDB(d){
+  d.onclose = ()=>{ if(db === d) db = null; };                    // OSに接続を閉じられた
+  d.onversionchange = ()=>{ d.close(); if(db === d) db = null; }; // 他のタブが更新を要求
+}
+async function reopenDB(){
+  try{ if(db) db.close(); }catch(e){}
+  db = null;
+  db = await withTimeout(openDB(), 5000, 'open timeout');
+  watchDB(db);
+  return db;
+}
+async function dbExec(mode, fn){
+  let lastErr;
+  for(let attempt = 0; attempt < 2; attempt++){
+    try{
+      if(!db) await reopenDB();
+      return await withTimeout(dbRun(mode, fn), DB_TIMEOUT, 'db timeout');
+    }catch(e){
+      lastErr = e;
+      try{ if(db) db.close(); }catch(_){}
+      db = null;                       // 次の試行で開き直す
+    }
+  }
+  throw lastErr;
+}
+
 // 1件の追加・更新を保存（失敗したら例外）
 async function persistPut(entry){
-  if(db){
-    await dbRun('readwrite', s=> s.put(entry));
+  if(useIDB){
+    await dbExec('readwrite', s=> s.put(entry));
   } else {
     localStorage.setItem(STORE_KEY, JSON.stringify(entries));
   }
 }
 // 1件の削除を保存（失敗したら例外）
 async function persistDelete(id){
-  if(db){
-    await dbRun('readwrite', s=> s.delete(id));
+  if(useIDB){
+    await dbExec('readwrite', s=> s.delete(id));
   } else {
     localStorage.setItem(STORE_KEY, JSON.stringify(entries));
   }
 }
 
 async function init(){
-  try{ db = await openDB(); }catch(e){ db = null; }
+  try{
+    db = await withTimeout(openDB(), 5000, 'open timeout');
+    watchDB(db);
+    useIDB = true;
+  }catch(e){ db = null; useIDB = false; }
 
   if(db){
     try{ entries = await dbGetAll(); }catch(e){ entries = []; }
@@ -449,6 +500,14 @@ function showToast(msg){
   t.classList.add('show');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(()=> t.classList.remove('show'), 3500);
+}
+
+function describeError(e){
+  const msg = String((e && e.message) || '');
+  const name = (e && e.name) || msg || 'unknown';
+  if(name === 'QuotaExceededError') return '端末の空き容量が足りません';
+  if(/timeout/i.test(msg)) return '保存先から応答がありません';
+  return name;
 }
 
 // ブラウザによるデータ自動削除を防ぐ（対応ブラウザのみ）
@@ -591,6 +650,7 @@ document.getElementById('cancelBtn').addEventListener('click', closeSheets);
 
 function openEditForm(entry){
   editingId = entry ? entry.id : null;
+  pendingNewId = null;
   document.getElementById('editTitle').textContent = entry ? 'ラベルを編集' : '今日の一杯を記録';
   document.getElementById('fName').value = entry ? entry.name : '';
   document.getElementById('fDate').value = entry ? entry.date : new Date().toISOString().slice(0,10);
@@ -646,7 +706,8 @@ document.getElementById('photoFile').addEventListener('change', (ev)=>{
 });
 
 let saving = false;
-document.getElementById('saveBtn').addEventListener('click', async ()=>{
+const saveBtn = document.getElementById('saveBtn');
+async function doSave(){
   if(saving) return;
   const nameEl = document.getElementById('fName');
   const name = nameEl.value.trim();
@@ -673,24 +734,43 @@ document.getElementById('saveBtn').addEventListener('click', async ()=>{
     entries[idx] = saved;
   } else {
     saved = {
-      id: uid(), name, date, memo, sweet, type: currentType, rating: currentRating,
+      id: pendingNewId || (pendingNewId = uid()), name, date, memo, sweet, type: currentType, rating: currentRating,
       photo: currentPhoto, thumb: currentThumb, createdAt: Date.now().toString()
     };
     entries.push(saved);
   }
 
   saving = true;
+  saveBtn.disabled = true;
+  saveBtn.textContent = '保存中…';
   try{
     await persistPut(saved);
   }catch(e){
     entries = backup;
-    saving = false;
-    showToast('保存に失敗しました。端末の空き容量を確認して、もう一度お試しください');
+    showToast('保存できませんでした（' + describeError(e) + '）。もう一度「記録する」を押してください');
     return;
+  }finally{
+    saving = false;
+    saveBtn.disabled = false;
+    saveBtn.textContent = '記録する';
   }
-  saving = false;
+  pendingNewId = null;
   closeSheets();
   renderAll();
+}
+
+// 指を離した瞬間に保存する。キーボードが閉じて画面がずれ、タップが外れるのを防ぐ
+let lastPointerSave = 0;
+saveBtn.addEventListener('pointerup', (e)=>{
+  if(e.pointerType === 'mouse') return;              // マウスは click に任せる
+  const r = saveBtn.getBoundingClientRect();
+  if(e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) return;
+  lastPointerSave = Date.now();
+  doSave();
+});
+saveBtn.addEventListener('click', ()=>{
+  if(Date.now() - lastPointerSave < 800) return;     // pointerup で処理済み
+  doSave();
 });
 
 /* ---------- Detail view ---------- */
@@ -721,7 +801,7 @@ document.getElementById('dDeleteBtn').addEventListener('click', async ()=>{
     await persistDelete(detailId);
   }catch(e){
     entries = backup;
-    showToast('削除に失敗しました。もう一度お試しください');
+    showToast('削除できませんでした（' + describeError(e) + '）。もう一度お試しください');
     return;
   }
   closeSheets();
