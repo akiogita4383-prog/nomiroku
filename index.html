@@ -149,6 +149,19 @@
   }
   .fab:active{ transform:scale(0.94); }
 
+  /* ---------- Toast ---------- */
+  #toast{
+    position:fixed; left:50%; bottom:calc(30px + env(safe-area-inset-bottom)); z-index:60;
+    transform:translate(-50%, 20px); opacity:0; pointer-events:none;
+    background:var(--surface-hover); color:var(--cream);
+    border:1px solid var(--gold); border-radius:10px;
+    padding:12px 18px; font-size:13px; line-height:1.5;
+    max-width:calc(100vw - 40px); text-align:center;
+    box-shadow:0 8px 24px rgba(0,0,0,0.5);
+    transition:opacity .2s ease, transform .2s ease;
+  }
+  #toast.show{ opacity:1; transform:translate(-50%, 0); }
+
   /* ---------- Sheet / Modal ---------- */
   .overlay{
     position:fixed; inset:0; background:rgba(10,8,5,0.6); backdrop-filter:blur(2px);
@@ -251,6 +264,7 @@
 <button class="fab" id="fabAdd">＋</button>
 
 <div class="overlay" id="overlay"></div>
+<div id="toast" role="status" aria-live="polite"></div>
 
 <!-- Add / Edit Sheet -->
 <div class="sheet" id="editSheet">
@@ -331,21 +345,115 @@ const TYPES = [
   {id:'other', label:'その他', glyph:'🍹', color:'var(--c-other)'},
 ];
 const typeMap = Object.fromEntries(TYPES.map(t=>[t.id,t]));
-const STORE_KEY = 'nomiroku_entries_v1';
+const STORE_KEY = 'nomiroku_entries_v1';   // 旧保存先（localStorage）。移行元として読むだけ
+const DB_NAME = 'nomiroku';
+const DB_STORE = 'entries';
 
-let entries = loadEntries();
+let entries = [];
+let db = null;               // IndexedDB。使えない環境では null（localStorageで代替）
 let activeFilter = 'all';
 let editingId = null;
-let currentPhoto = null;
+let currentPhoto = null;     // 詳細表示用（大きめ）
+let currentThumb = null;     // 一覧表示用（小さめ）
 let currentType = 'sake';
 let currentRating = 3;
 
-function loadEntries(){
-  try{ return JSON.parse(localStorage.getItem(STORE_KEY)) || []; }
-  catch(e){ return []; }
+/* ---------- Storage (IndexedDB) ---------- */
+function openDB(){
+  return new Promise((resolve, reject)=>{
+    if(!window.indexedDB){ reject(new Error('IndexedDB unsupported')); return; }
+    let req;
+    try{ req = indexedDB.open(DB_NAME, 1); }catch(e){ reject(e); return; }
+    req.onupgradeneeded = ()=> req.result.createObjectStore(DB_STORE, {keyPath:'id'});
+    req.onsuccess = ()=> resolve(req.result);
+    req.onerror = ()=> reject(req.error);
+    req.onblocked = ()=> reject(new Error('IndexedDB blocked'));
+  });
 }
-function saveEntries(){
-  localStorage.setItem(STORE_KEY, JSON.stringify(entries));
+function dbRun(mode, fn){
+  return new Promise((resolve, reject)=>{
+    const tx = db.transaction(DB_STORE, mode);
+    const store = tx.objectStore(DB_STORE);
+    let result;
+    fn(store, v=>{ result = v; });
+    tx.oncomplete = ()=> resolve(result);
+    tx.onerror = ()=> reject(tx.error);
+    tx.onabort = ()=> reject(tx.error || new Error('transaction aborted'));
+  });
+}
+function dbGetAll(){
+  return new Promise((resolve, reject)=>{
+    const req = db.transaction(DB_STORE,'readonly').objectStore(DB_STORE).getAll();
+    req.onsuccess = ()=> resolve(req.result || []);
+    req.onerror = ()=> reject(req.error);
+  });
+}
+function readLegacy(){
+  try{
+    const v = JSON.parse(localStorage.getItem(STORE_KEY));
+    return Array.isArray(v) ? v : [];
+  }catch(e){ return []; }
+}
+
+// 1件の追加・更新を保存（失敗したら例外）
+async function persistPut(entry){
+  if(db){
+    await dbRun('readwrite', s=> s.put(entry));
+  } else {
+    localStorage.setItem(STORE_KEY, JSON.stringify(entries));
+  }
+}
+// 1件の削除を保存（失敗したら例外）
+async function persistDelete(id){
+  if(db){
+    await dbRun('readwrite', s=> s.delete(id));
+  } else {
+    localStorage.setItem(STORE_KEY, JSON.stringify(entries));
+  }
+}
+
+async function init(){
+  try{ db = await openDB(); }catch(e){ db = null; }
+
+  if(db){
+    try{ entries = await dbGetAll(); }catch(e){ entries = []; }
+
+    // 旧バージョン（localStorage）の記録をIndexedDBへ移行
+    const legacy = readLegacy();
+    if(legacy.length){
+      try{
+        const have = new Set(entries.map(e=>e.id));
+        const toAdd = legacy.filter(e=> e && e.id && !have.has(e.id));
+        if(toAdd.length){
+          await dbRun('readwrite', s=> toAdd.forEach(e=> s.put(e)));
+          entries = entries.concat(toAdd);
+        }
+        localStorage.removeItem(STORE_KEY);   // 移行成功後のみ削除
+      }catch(e){
+        // 移行失敗時は旧データを残す（次回起動時に再挑戦）
+        entries = entries.concat(legacy.filter(l=> !entries.some(x=>x.id===l.id)));
+        showToast('旧データの移行に失敗しました。次回起動時に再試行します');
+      }
+    }
+  } else {
+    entries = readLegacy();
+    showToast('このブラウザでは大容量保存が使えません（保存容量に上限があります）');
+  }
+  renderAll();
+}
+
+let toastTimer = null;
+function showToast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=> t.classList.remove('show'), 3500);
+}
+
+// ブラウザによるデータ自動削除を防ぐ（対応ブラウザのみ）
+if(navigator.storage && navigator.storage.persist){
+  navigator.storage.persist().catch(()=>{});
 }
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
 
@@ -401,8 +509,9 @@ function renderList(){
 function cardHTML(e){
   const t = typeMap[e.type];
   const dateStr = formatDate(e.date);
-  const photo = e.photo
-    ? `<img src="${e.photo}" alt="">`
+  const listImg = e.thumb || e.photo;
+  const photo = listImg
+    ? `<img src="${listImg}" alt="" loading="lazy">`
     : t.glyph;
   const dots = [1,2,3,4,5].map(i=>`<span class="rd ${i<=e.rating?'filled':''}"></span>`).join('');
   const pinPos = ((e.sweet-1)/4*100);
@@ -490,6 +599,7 @@ function openEditForm(entry){
   currentType = entry ? entry.type : 'sake';
   currentRating = entry ? entry.rating : 3;
   currentPhoto = entry ? entry.photo : null;
+  currentThumb = entry ? (entry.thumb || null) : null;
   renderTypeGrid();
   renderStarRow();
   renderPhotoPreview();
@@ -504,45 +614,81 @@ function renderPhotoPreview(){
 }
 
 document.getElementById('photoInput').addEventListener('click', ()=> document.getElementById('photoFile').click());
+let photoBusy = false;
 document.getElementById('photoFile').addEventListener('change', (ev)=>{
   const file = ev.target.files[0];
   if(!file) return;
+  photoBusy = true;
+  const done = ()=>{ photoBusy = false; ev.target.value = ''; };
   const reader = new FileReader();
+  reader.onerror = ()=>{ showToast('写真を読み込めませんでした'); done(); };
   reader.onload = (e)=>{
     const img = new Image();
+    img.onerror = ()=>{ showToast('この形式の写真は使えません（JPEG/PNGをお試しください）'); done(); };
     img.onload = ()=>{
-      const maxW = 800;
-      const scale = Math.min(1, maxW/img.width);
-      const canvas = document.createElement('canvas');
-      canvas.width = img.width*scale;
-      canvas.height = img.height*scale;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(img,0,0,canvas.width,canvas.height);
-      currentPhoto = canvas.toDataURL('image/jpeg', 0.72);
+      // 詳細用（大きめ・高画質）と、一覧用のサムネイルを両方作る
+      const resize = (maxW, quality)=>{
+        const scale = Math.min(1, maxW/Math.max(img.width, img.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(img.width*scale));
+        canvas.height = Math.max(1, Math.round(img.height*scale));
+        canvas.getContext('2d').drawImage(img,0,0,canvas.width,canvas.height);
+        return canvas.toDataURL('image/jpeg', quality);
+      };
+      currentPhoto = resize(1280, 0.85);
+      currentThumb = resize(320, 0.75);
       renderPhotoPreview();
+      done();
     };
     img.src = e.target.result;
   };
   reader.readAsDataURL(file);
 });
 
-document.getElementById('saveBtn').addEventListener('click', ()=>{
-  const name = document.getElementById('fName').value.trim();
-  if(!name){ document.getElementById('fName').focus(); return; }
+let saving = false;
+document.getElementById('saveBtn').addEventListener('click', async ()=>{
+  if(saving) return;
+  const nameEl = document.getElementById('fName');
+  const name = nameEl.value.trim();
+  if(!name){
+    showToast('お酒の名前を入力してください');
+    nameEl.focus();
+    nameEl.scrollIntoView({behavior:'smooth', block:'center'});
+    return;
+  }
+  if(photoBusy){
+    showToast('写真を処理中です。少し待ってからもう一度押してください');
+    return;
+  }
   const date = document.getElementById('fDate').value || new Date().toISOString().slice(0,10);
   const memo = document.getElementById('fMemo').value.trim();
   const sweet = parseInt(document.getElementById('fSweet').value);
 
+  const backup = entries.slice();
+  let saved;
   if(editingId){
     const idx = entries.findIndex(e=>e.id===editingId);
-    entries[idx] = {...entries[idx], name, date, memo, sweet, type:currentType, rating:currentRating, photo:currentPhoto};
+    if(idx === -1){ showToast('編集対象が見つかりません'); return; }
+    saved = {...entries[idx], name, date, memo, sweet, type:currentType, rating:currentRating, photo:currentPhoto, thumb:currentThumb};
+    entries[idx] = saved;
   } else {
-    entries.push({
+    saved = {
       id: uid(), name, date, memo, sweet, type: currentType, rating: currentRating,
-      photo: currentPhoto, createdAt: Date.now().toString()
-    });
+      photo: currentPhoto, thumb: currentThumb, createdAt: Date.now().toString()
+    };
+    entries.push(saved);
   }
-  saveEntries();
+
+  saving = true;
+  try{
+    await persistPut(saved);
+  }catch(e){
+    entries = backup;
+    saving = false;
+    showToast('保存に失敗しました。端末の空き容量を確認して、もう一度お試しください');
+    return;
+  }
+  saving = false;
   closeSheets();
   renderAll();
 });
@@ -567,15 +713,22 @@ document.getElementById('dEditBtn').addEventListener('click', ()=>{
   closeSheets();
   setTimeout(()=> openEditForm(e), 200);
 });
-document.getElementById('dDeleteBtn').addEventListener('click', ()=>{
+document.getElementById('dDeleteBtn').addEventListener('click', async ()=>{
   if(!confirm('この記録を削除しますか？')) return;
+  const backup = entries.slice();
   entries = entries.filter(e=>e.id!==detailId);
-  saveEntries();
+  try{
+    await persistDelete(detailId);
+  }catch(e){
+    entries = backup;
+    showToast('削除に失敗しました。もう一度お試しください');
+    return;
+  }
   closeSheets();
   renderAll();
 });
 
-renderAll();
+init();
 </script>
 </body>
 </html>
